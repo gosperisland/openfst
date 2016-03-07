@@ -114,6 +114,37 @@ template <class A> const uint32 StateComparator<A>::kCompareArcs;
 template <class A> const uint32 StateComparator<A>::kCompareAll;
 
 
+
+// class StateIlabelHasher is a hashing object that computes a hash-function
+// of an FST state that depends only on the set of ilabels on arcs leaving
+// the state [note: it assumes the arcs are ilabel-sorted].
+// [In order to work correctly for non-deterministic automata, multiple
+// instances of the same ilabel count the same as a single instance.]
+
+template <class A>
+class StateIlabelHasher {
+ public:
+  StateIlabelHasher(const Fst<A>& fst): fst_(fst) { }
+
+  typedef typename A::Label Label;
+  typedef typename A::StateId StateId;
+
+  size_t operator () (const StateId s) {
+    const size_t p1 = 7603, p2 = 433024223;
+    size_t ans = p2, current_ilabel = kNoLabel;
+    for (ArcIterator<Fst<A> > aiter(fst_, s); !aiter.Done(); aiter.Next()) {
+      Label this_ilabel = aiter.Value().ilabel;
+      if (this_ilabel != current_ilabel) {  // ignore repeats.
+        ans = p1 * ans + this_ilabel;
+        current_ilabel = this_ilabel;
+      }
+    }
+    return ans;
+  }
+ private:
+  const Fst<A>& fst_;
+};
+
 // Computes equivalence classes for cyclic Fsts. For cyclic minimization
 // we use the classic HopCroft minimization algorithm, which is of
 //
@@ -134,7 +165,14 @@ class CyclicMinimizer {
   typedef typename A::Weight Weight;
   typedef ReverseArc<A> RevA;
 
-  CyclicMinimizer(const ExpandedFst<A>& fst) {
+  CyclicMinimizer(const ExpandedFst<A>& fst):
+      // tell the Partition data-member to expect multiple repeated
+      // calls to SplitOn with the same element if we are non-deterministic.
+      P_(fst.Properties(kIDeterministic, true) == 0) {
+    if(fst.Properties(kIDeterministic, true) == 0)
+      CHECK(Weight::Properties() & kIdempotent); // this minimization
+    // algorithm for non-deterministic FSTs can only work with idempotent
+    // semirings.
     Initialize(fst);
     Compute(fst);
   }
@@ -158,8 +196,7 @@ class CyclicMinimizer {
     ArcIterCompare(const ArcIterCompare& comp)
         : partition_(comp.partition_) {}
 
-    // compare two iterators based on there input labels, and proto state
-    // (partition class Ids)
+    // compare two iterators based on their input labels
     bool operator()(const ArcIter* x, const ArcIter* y) const {
       const RevA& xarc = x->Value();
       const RevA& yarc = y->Value();
@@ -167,6 +204,7 @@ class CyclicMinimizer {
     }
 
    private:
+    // actually this data-member is not used.
     const Partition<StateId>& partition_;
   };
 
@@ -175,52 +213,72 @@ class CyclicMinimizer {
 
   // helper methods
  private:
-  // prepartitions the space into equivalence classes with
-  //   same final weight
-  //   same # arcs per state
-  //   same outgoing arcs
-  void PrePartition(const Fst<A>& fst) {
+  // Prepartitions the space into equivalence classes
+  // We ensure that final and non-final states always go into different
+  // equivalence classes, and we use class StateIlabelHasher to make sure
+  // that most of the time, states with different sets of ilabels on
+  // arcs leaving them, go to different partitions.
+  // Note: for the O(N) guarantees we don't rely on the goodness of this hashing
+  // function-- it just provides a bonus speedup.
+  void PrePartition(const ExpandedFst<A>& fst) {
     VLOG(5) << "PrePartition";
 
-    typedef map<StateId, StateId, StateComparator<A> > EquivalenceMap;
-    StateComparator<A> comp(fst, P_, StateComparator<A>::kCompareFinal);
-    EquivalenceMap equiv_map(comp);
+    StateId next_class = 0, num_states = fst.NumStates();
+    // allocate a temporary vector to store the initial class mappings, so that
+    // we can allocate the classes all at once.
+    std::vector<StateId> state_to_initial_class(num_states);
 
-    StateIterator<Fst<A> > siter(fst);
-    StateId class_id = P_.AddClass();
-    P_.Add(siter.Value(), class_id);
-    equiv_map[siter.Value()] = class_id;
-    L_.Enqueue(class_id);
-    for (siter.Next(); !siter.Done(); siter.Next()) {
-      StateId  s = siter.Value();
-      typename EquivalenceMap::const_iterator it = equiv_map.find(s);
-      if (it == equiv_map.end()) {
-        class_id = P_.AddClass();
-        P_.Add(s, class_id);
-        equiv_map[s] = class_id;
-        L_.Enqueue(class_id);
-      } else {
-        P_.Add(s, it->second);
-        equiv_map[s] = it->second;
+
+    {
+      // we maintain two maps from hash-value to class-- one for
+      // final states (final-prob == One()) and one for non-final
+      // states (final-prob == Zero()).  We are processing
+      // unweighted acceptors, so these are the only two possible values.
+      typedef unordered_map<size_t, StateId> HashToClassMap;
+      HashToClassMap hash_to_class_nonfinal,
+          hash_to_class_final;
+      StateIlabelHasher<A> hasher(fst);
+
+      for (StateId s = 0; s < num_states; s++) {
+        size_t hash = hasher(s);
+        HashToClassMap &this_map =
+            (fst.Final(s) != Weight::Zero() ? hash_to_class_final:
+             hash_to_class_nonfinal);
+        // avoid two map lookups by using 'insert' instead of 'find'.
+        std::pair<const size_t, StateId> value(hash, next_class);
+        std::pair<typename HashToClassMap::iterator, bool> p =
+            this_map.insert(value);
+        if (p.second) {  // pair was inserted
+          state_to_initial_class[s] = next_class++;
+        } else {  // the hash value is already a key in the map.
+          state_to_initial_class[s] = p.first->second;
+        }
       }
+      // let the unordered_maps go out of scope before we allocate the classes,
+      // to reduce the maximum amount of memory used.
     }
-
+    P_.AllocateClasses(next_class);
+    for (StateId s = 0; s < num_states; s++)
+      P_.Add(s, state_to_initial_class[s]);
+    for (StateId c = 0; c < next_class; c++)
+      L_.Enqueue(c);
     VLOG(5) << "Initial Partition: " << P_.num_classes();
   }
 
   // - Create inverse transition Tr_ = rev(fst)
   // - loop over states in fst and split on final, creating two blocks
   //   in the partition corresponding to final, non-final
-  void Initialize(const Fst<A>& fst) {
+  void Initialize(const ExpandedFst<A>& fst) {
     // construct Tr
     Reverse(fst, &Tr_);
     ILabelCompare<RevA> ilabel_comp;
     ArcSort(&Tr_, ilabel_comp);
 
-    // initial split (F, S - F)
+    // tell the partition how many elements to allocate.
+    // note: first state in Tr_ is super-final state.
     P_.Initialize(Tr_.NumStates() - 1);
 
-    // prep partition
+    // prepare initial partition
     PrePartition(fst);
 
     // allocate arc iterator queue
@@ -248,7 +306,7 @@ class CyclicMinimizer {
       if (aiter->Done()) {
         delete aiter;
         continue;
-     }
+      }
 
       const RevA& arc = aiter->Value();
       StateId from_state = aiter->Value().nextstate - 1;
@@ -315,7 +373,13 @@ class AcyclicMinimizer {
   typedef typename A::StateId ClassId;
   typedef typename A::Weight Weight;
 
-  AcyclicMinimizer(const ExpandedFst<A>& fst) {
+  AcyclicMinimizer(const ExpandedFst<A>& fst):
+      // tell the Partition data-member to expect multiple repeated
+      // calls to SplitOn with the same element if we are non-deterministic.
+      partition_(fst.Properties(kIDeterministic, true) == 0) {
+    if(fst.Properties(kIDeterministic, true) == 0)
+      CHECK(Weight::Properties() & kIdempotent); // minimization for
+    // non-deterministic FSTs can only work with idempotent semirings.
     Initialize(fst);
     Refine(fst);
   }
@@ -496,7 +560,8 @@ void AcceptorMinimize(MutableFst<A>* fst) {
   Connect(fst);
   if (fst->NumStates() == 0) return;
 
-  if (fst->Properties(kAcyclic, true)) {
+  if (fst->Properties(kAcyclic, true) &&
+      fst->Properties(kIDeterministic, true)) {
     // Acyclic minimization (revuz)
     VLOG(2) << "Acyclic Minimization";
     ArcSort(fst, ILabelCompare<A>());
@@ -516,28 +581,25 @@ void AcceptorMinimize(MutableFst<A>* fst) {
 }
 
 
-// In place minimization of deterministic weighted automata and transducers.
+// In place minimization of deterministic weighted automata and transducers,
+// and non-deterministic ones if they use an idempotent semiring.
 // For transducers, then the 'sfst' argument is not null, the algorithm
 // produces a compact factorization of the minimal transducer.
 //
-// In the acyclic case, we use an algorithm from Dominique Revuz that
+// In the acyclic deterministic case, we use an algorithm from Dominique Revuz that
 // is linear in the number of arcs (edges) in the machine.
 //  Complexity = O(E)
 //
-// In the cyclic case, we use the classical hopcroft minimization.
+// In the cyclic or non-deterministic case, we use the classical hopcroft
+// minimization (which was presented for the deterministic case but which
+// also works for non-deterministic FSTs).
 //  Complexity = O(|E|log(|N|)
 //
 template <class A>
 void Minimize(MutableFst<A>* fst,
               MutableFst<A>* sfst = 0,
               float delta = kDelta) {
-  uint64 props = fst->Properties(kAcceptor | kIDeterministic|
-                                 kWeighted | kUnweighted, true);
-  if (!(props & kIDeterministic)) {
-    FSTERROR() << "FST is not deterministic";
-    fst->SetProperties(kError, kError);
-    return;
-  }
+  uint64 props = fst->Properties(kAcceptor | kWeighted | kUnweighted, true);
 
   if (!(props & kAcceptor)) {  // weighted transducer
     VectorFst< GallicArc<A, STRING_LEFT> > gfst;
