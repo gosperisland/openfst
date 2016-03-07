@@ -105,36 +105,6 @@ template <class A>
 const uint32 StateComparator<A>::kCompareAll;
 
 
-// class StateIlabelHasher is a hashing object that computes a hash-function
-// of an FST state that depends only on the set of ilabels on arcs leaving
-// the state [note: it assumes the arcs are ilabel-sorted].
-// [In order to work correctly for non-deterministic automata, multiple
-// instances of the same ilabel count the same as a single instance.]
-
-template <class A>
-class StateIlabelHasher {
- public:
-  StateIlabelHasher(const Fst<A>& fst): fst_(fst) { }
-
-  typedef typename A::Label Label;
-  typedef typename A::StateId StateId;
-
-  size_t operator () (const StateId s) {
-    const size_t p1 = 7603, p2 = 433024223;
-    size_t ans = p2, current_ilabel = kNoLabel;
-    for (ArcIterator<Fst<A> > aiter(fst_, s); !aiter.Done(); aiter.Next()) {
-      Label this_ilabel = aiter.Value().ilabel;
-      if (this_ilabel != current_ilabel) {  // ignore repeats.
-        ans = p1 * ans + this_ilabel;
-        current_ilabel = this_ilabel;
-      }
-    }
-    return ans;
-  }
- private:
-  const Fst<A>& fst_;
-};
-
 // Computes equivalence classes for cyclic unweighted acceptors. For cyclic
 // minimization we use the classic HopCroft minimization algorithm, which is of
 //
@@ -173,6 +143,35 @@ class CyclicMinimizer {
   // helper classes
  private:
   typedef ArcIterator<Fst<RevA>> ArcIter;
+
+  // StateIlabelHasher is a hashing object that computes a hash-function
+  // of an FST state that depends only on the set of ilabels on arcs leaving
+  // the state [note: it assumes that the arcs are ilabel-sorted].
+  // In order to work correctly for non-deterministic automata, multiple
+  // instances of the same ilabel count the same as a single instance.
+  class StateIlabelHasher {
+   public:
+    StateIlabelHasher(const Fst<A>& fst): fst_(fst) { }
+
+    typedef typename A::Label Label;
+    typedef typename A::StateId StateId;
+
+    size_t operator () (const StateId s) {
+      const size_t p1 = 7603, p2 = 433024223;
+      size_t ans = p2, current_ilabel = kNoLabel;
+      for (ArcIterator<Fst<A> > aiter(fst_, s); !aiter.Done(); aiter.Next()) {
+        Label this_ilabel = aiter.Value().ilabel;
+        if (this_ilabel != current_ilabel) {  // ignore repeats.
+          ans = p1 * ans + this_ilabel;
+          current_ilabel = this_ilabel;
+        }
+      }
+      return ans;
+    }
+   private:
+    const Fst<A>& fst_;
+  };
+
   class ArcIterCompare {
    public:
     ArcIterCompare(const Partition<StateId>& partition)
@@ -221,7 +220,7 @@ class CyclicMinimizer {
       typedef unordered_map<size_t, StateId> HashToClassMap;
       HashToClassMap hash_to_class_nonfinal,
           hash_to_class_final;
-      StateIlabelHasher<A> hasher(fst);
+      StateIlabelHasher hasher(fst);
 
       for (StateId s = 0; s < num_states; s++) {
         size_t hash = hasher(s);

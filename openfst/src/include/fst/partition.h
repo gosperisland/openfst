@@ -55,35 +55,6 @@ class PartitionIterator;
 //        and haven't subsequently called FinalizeSplit().
 template <typename T>
 class Partition {
-  friend class PartitionIterator<T>;
-
-  // information about a given element
-  struct Element {
-    // this struct doesn't have a constructor; when the user calls Add() for
-    // each element, we'll set all fields.
-    T class_id;  // class-id of this element
-    T yes;      // this is to be interpreted as a bool, true if it's in the
-                // 'yes' set of this class.  the interpretation as bool is, (yes
-                // == yes_counter_ ? true : false).
-    T next_element;  // next element in the 'no' list or 'yes' list of this class,
-                     // whichever of the two we belong to (think of this as the 'next'
-                     // in a doubly-linked list, although it's an index into the
-                     // elements array).  negative value corresponds to NULL.
-    T prev_element;  // previous element in the 'no' or 'yes' doubly linked
-                     // list.  negative value corresponds to NULL.
-  };
-
-  // information about a given class.
-  struct Class {
-    Class(): size(0), yes_size(0), no_head(-1), yes_head(-1) { }
-    T size;  // total number of elements in this class ('no' plus 'yes' subsets)
-    T yes_size;  // total number of elements of 'yes' subset of this class.
-    T no_head;  // index of head element of doubly-linked list in 'no' subset.
-                // [everything is in the 'no' subset until you call SplitOn()].
-                // -1 means no element.
-    T yes_head;  // index of head element of doubly-linked list in 'yes' subset.
-                 // -1 means no element.
-  };
  public:
   Partition() { }
 
@@ -222,6 +193,36 @@ class Partition {
   const T num_classes() const { return classes_.size(); }
 
  private:
+  friend class PartitionIterator<T>;
+
+  // information about a given element
+  struct Element {
+    // this struct doesn't have a constructor; when the user calls Add() for
+    // each element, we'll set all fields.
+    T class_id;  // class-id of this element
+    T yes;      // this is to be interpreted as a bool, true if it's in the
+                // 'yes' set of this class.  the interpretation as bool is, (yes
+                // == yes_counter_ ? true : false).
+    T next_element;  // next element in the 'no' list or 'yes' list of this class,
+                     // whichever of the two we belong to (think of this as the 'next'
+                     // in a doubly-linked list, although it's an index into the
+                     // elements array).  negative value corresponds to NULL.
+    T prev_element;  // previous element in the 'no' or 'yes' doubly linked
+                     // list.  negative value corresponds to NULL.
+  };
+
+  // information about a given class.
+  struct Class {
+    Class(): size(0), yes_size(0), no_head(-1), yes_head(-1) { }
+    T size;  // total number of elements in this class ('no' plus 'yes' subsets)
+    T yes_size;  // total number of elements of 'yes' subset of this class.
+    T no_head;  // index of head element of doubly-linked list in 'no' subset.
+                // [everything is in the 'no' subset until you call SplitOn()].
+                // -1 means no element.
+    T yes_head;  // index of head element of doubly-linked list in 'yes' subset.
+                 // -1 means no element.
+  };
+
   // This function, called from FinalizeSplit(), checks whether
   // a class has to be split (a class will be split only if its 'yes'
   // and 'no' subsets are both nonempty, but we can assume that since this
