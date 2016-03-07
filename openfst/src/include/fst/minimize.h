@@ -545,7 +545,7 @@ void AcceptorMinimize(MutableFst<A>* fst,
                       bool allow_acyclic_minimization = true) {
   typedef typename A::StateId StateId;
   if (!(fst->Properties(kAcceptor | kUnweighted, true) ==
-        kAcceptor | kUnweighted)) {
+        (kAcceptor|kUnweighted))) {
     FSTERROR() << "FST is not an unweighted acceptor";
     fst->SetProperties(kError, kError);
     return;
@@ -555,7 +555,7 @@ void AcceptorMinimize(MutableFst<A>* fst,
   Connect(fst);
   if (fst->NumStates() == 0) return;
 
-  if (fst->Properties(kAcyclic, true) && allow_acyclic_minimization) {
+  if (allow_acyclic_minimization && fst->Properties(kAcyclic, true)) {
     // Acyclic minimization (revuz)
     VLOG(2) << "Acyclic Minimization";
     ArcSort(fst, ILabelCompare<A>());
