@@ -137,7 +137,6 @@ class Partition {
   // currently be a member of any class; once elements have been added to
   // a class, use the Move() method to move them from one class to another.
   void Add(T element_id, T class_id) {
-    std::cerr << "called Add " << element_id << "," << class_id << "\n";
     Element &this_element = elements_[element_id];
     Class &this_class = classes_[class_id];
     this_class.size++;
@@ -157,7 +156,6 @@ class Partition {
   // class class_id.  This may not work correctly if you have called SplitOn()
   // [for any element] and haven't subsequently called FinalizeSplit().
   void Move(T element_id, T class_id) {
-    std::cerr << "called Move " << element_id << "," << class_id << "\n";
     Element *elements = &(elements_[0]);
     Element &element = elements[element_id];
     CHECK(element.yes != yes_counter_);  // I'll remove this later.
@@ -182,7 +180,6 @@ class Partition {
   // 'yes' subset, and we make sure its class is included in the
   // 'visited_classes_' list.
   void SplitOn(T element_id) {
-    std::cerr << "called splitOn " << element_id << "\n";
     Element *elements = &(elements_[0]);
     Element &element = elements[element_id];
     if (element.yes == yes_counter_) return;  // already in the 'yes' set; nothing to do.
@@ -222,7 +219,6 @@ class Partition {
   // function then moves all elements to the 'no' subset of their class.
   template <class Queue>
   void FinalizeSplit(Queue* L) {
-    std::cerr << "called FinalizeSplit()\n";
     for (size_t i = 0, size = visited_classes_.size(); i < size; ++i) {
       T new_class = SplitRefine(visited_classes_[i]);
       if (new_class != -1 && L)
@@ -238,18 +234,11 @@ class Partition {
     return elements_[element_id].class_id;
   }
 
-  const size_t class_size(T class_id)  const {
-    return classes_[class_id].size;
-  }
+  const size_t class_size(T class_id)  const { return classes_[class_id].size; }
 
-  const T num_classes() const {
-    return classes_.size();
-  }
-
+  const T num_classes() const { return classes_.size(); }
 
  private:
-
-
   // This function, called from FinalizeSplit(), checks whether
   // a class has to be split (a class will be split only if its 'yes'
   // and 'no' subsets are both nonempty, but we can assume that since this
@@ -333,22 +322,18 @@ class PartitionIterator {
         class_id_(class_id) {}
 
   bool Done() {
-    std::cerr << "partitionIterator::Done()\n";
     return (element_id_ < 0);
   }
 
   const T Value() {
-    std::cerr << "partitionIterator::Value()\n";
     return element_id_;
   }
 
   void Next() {
-    std::cerr << "partitionIterator::Next()\n";
     element_id_ = p_.elements_[element_id_].next_element;
   }
 
   void Reset() {
-    std::cerr << "partitionIterator::Reset()\n";
     element_id_ = p_.classes_[class_id_].no_head;
   }
 

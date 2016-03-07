@@ -548,7 +548,8 @@ void MergeStates(
 }
 
 template <class A>
-void AcceptorMinimize(MutableFst<A>* fst) {
+void AcceptorMinimize(MutableFst<A>* fst,
+                      bool allow_acyclic_minimization = true) {
   typedef typename A::StateId StateId;
   if (!(fst->Properties(kAcceptor | kUnweighted, true))) {
     FSTERROR() << "FST is not an unweighted acceptor";
@@ -560,16 +561,16 @@ void AcceptorMinimize(MutableFst<A>* fst) {
   Connect(fst);
   if (fst->NumStates() == 0) return;
 
-  if (fst->Properties(kAcyclic, true) &&
-      fst->Properties(kIDeterministic, true)) {
+  if (fst->Properties(kAcyclic, true) && allow_acyclic_minimization) {
     // Acyclic minimization (revuz)
     VLOG(2) << "Acyclic Minimization";
     ArcSort(fst, ILabelCompare<A>());
     AcyclicMinimizer<A> minimizer(*fst);
     MergeStates(minimizer.partition(), fst);
-
   } else {
-    // Cyclic minimizaton (hopcroft)
+    // either the FST has cycles, or it's generated from non-deterministic input
+    // (which the Revuz algorithm can't handle), so use the cyclic minimization
+    // algorithm of Hopcroft.
     VLOG(2) << "Cyclic Minimization";
     CyclicMinimizer<A, LifoQueue<StateId> > minimizer(*fst);
     MergeStates(minimizer.partition(), fst);
@@ -599,7 +600,26 @@ template <class A>
 void Minimize(MutableFst<A>* fst,
               MutableFst<A>* sfst = 0,
               float delta = kDelta) {
-  uint64 props = fst->Properties(kAcceptor | kWeighted | kUnweighted, true);
+  uint64 props = fst->Properties(kAcceptor | kWeighted | kUnweighted |
+                                 kIDeterministic, true);
+  bool allow_acyclic_minimization;
+  if (props & kIDeterministic) {
+    allow_acyclic_minimization = true;
+  } else {
+    // our approach to minimization of non-deterministic FSTs will only work in
+    // idempotent semirings-- for non-deterministic inputs, a state could have
+    // multiple transitions to states that will get merged, and we'd have to sum
+    // their weights.  the algorithm doesn't handle that so forbid it.
+    CHECK(A::Weight::Properties() & kIdempotent);
+    // the algorithm of Revuz won't work for nondeterministic inputs, so if the
+    // input is nondeterministic, we'll have to pass a bool saying not to use
+    // that algorithm.  we check at this level rather than in
+    // AcceptorMinimize(), because it's possible that the Fst at this level
+    // could be deterministic, but a harmless type of non-determinism could be
+    // introduced by Encode() [thanks to kEncodeWeights, if the FST has epsilons
+    // and has a final-prob with weights equal to some epsilon arc.]
+    allow_acyclic_minimization = false;
+  }
 
   if (!(props & kAcceptor)) {  // weighted transducer
     VectorFst< GallicArc<A, STRING_LEFT> > gfst;
@@ -611,7 +631,7 @@ void Minimize(MutableFst<A>* fst,
     EncodeMapper< GallicArc<A, STRING_LEFT> >
       encoder(kEncodeLabels | kEncodeWeights, ENCODE);
     Encode(&gfst, &encoder);
-    AcceptorMinimize(&gfst);
+    AcceptorMinimize(&gfst, allow_acyclic_minimization);
     Decode(&gfst, encoder);
 
     if (sfst == 0) {
@@ -634,10 +654,10 @@ void Minimize(MutableFst<A>* fst,
     ArcMap(fst, QuantizeMapper<A>(delta));
     EncodeMapper<A> encoder(kEncodeLabels | kEncodeWeights, ENCODE);
     Encode(fst, &encoder);
-    AcceptorMinimize(fst);
+    AcceptorMinimize(fst, allow_acyclic_minimization);
     Decode(fst, encoder);
   } else {  // unweighted acceptor
-    AcceptorMinimize(fst);
+    AcceptorMinimize(fst, allow_acyclic_minimization);
   }
 }
 
