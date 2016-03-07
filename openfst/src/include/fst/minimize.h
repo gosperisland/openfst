@@ -145,8 +145,8 @@ class StateIlabelHasher {
   const Fst<A>& fst_;
 };
 
-// Computes equivalence classes for cyclic Fsts. For cyclic minimization
-// we use the classic HopCroft minimization algorithm, which is of
+// Computes equivalence classes for cyclic unweighted acceptors. For cyclic
+// minimization we use the classic HopCroft minimization algorithm, which is of
 //
 //   O(E)log(N),
 //
@@ -156,6 +156,12 @@ class StateIlabelHasher {
 //  An N Log N algorithm for minimizing states in a finite automaton
 //  by John HopCroft, January 1971
 //
+// Note: the original presentation of the paper was for a finite automaton (==
+// deterministic, unweighted acceptor), but we also apply it to the
+// nondeterministic case, where it is also applicable as long as the semiring is
+// idempotent (if the semiring is not idempotent, there are some complexities
+// in keeping track of the weight when there are multiple arcs to states that
+// will be merged, and we don't deal with this).
 template <class A, class Queue>
 class CyclicMinimizer {
  public:
@@ -165,14 +171,7 @@ class CyclicMinimizer {
   typedef typename A::Weight Weight;
   typedef ReverseArc<A> RevA;
 
-  CyclicMinimizer(const ExpandedFst<A>& fst):
-      // tell the Partition data-member to expect multiple repeated
-      // calls to SplitOn with the same element if we are non-deterministic.
-      P_(fst.Properties(kIDeterministic, true) == 0) {
-    if(fst.Properties(kIDeterministic, true) == 0)
-      CHECK(Weight::Properties() & kIdempotent); // this minimization
-    // algorithm for non-deterministic FSTs can only work with idempotent
-    // semirings.
+  CyclicMinimizer(const ExpandedFst<A>& fst) {
     Initialize(fst);
     Compute(fst);
   }
@@ -373,13 +372,7 @@ class AcyclicMinimizer {
   typedef typename A::StateId ClassId;
   typedef typename A::Weight Weight;
 
-  AcyclicMinimizer(const ExpandedFst<A>& fst):
-      // tell the Partition data-member to expect multiple repeated
-      // calls to SplitOn with the same element if we are non-deterministic.
-      partition_(fst.Properties(kIDeterministic, true) == 0) {
-    if(fst.Properties(kIDeterministic, true) == 0)
-      CHECK(Weight::Properties() & kIdempotent); // minimization for
-    // non-deterministic FSTs can only work with idempotent semirings.
+  AcyclicMinimizer(const ExpandedFst<A>& fst) {
     Initialize(fst);
     Refine(fst);
   }
@@ -551,7 +544,8 @@ template <class A>
 void AcceptorMinimize(MutableFst<A>* fst,
                       bool allow_acyclic_minimization = true) {
   typedef typename A::StateId StateId;
-  if (!(fst->Properties(kAcceptor | kUnweighted, true))) {
+  if (!(fst->Properties(kAcceptor | kUnweighted, true) ==
+        kAcceptor | kUnweighted)) {
     FSTERROR() << "FST is not an unweighted acceptor";
     fst->SetProperties(kError, kError);
     return;
