@@ -578,7 +578,7 @@ void AcceptorMinimize(MutableFst<A>* fst,
 
 // In place minimization of deterministic weighted automata and transducers,
 // and non-deterministic ones if they use an idempotent semiring.
-// For transducers, then the 'sfst' argument is not null, the algorithm
+// For transducers, if the 'sfst' argument is not null, the algorithm
 // produces a compact factorization of the minimal transducer.
 //
 // In the acyclic deterministic case, we use an algorithm from Dominique Revuz that
