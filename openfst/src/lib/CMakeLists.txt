@@ -1,9 +1,7 @@
 cmake_minimum_required(VERSION 2.6)
 project (LibraryTest)
 
-message (${BOOST_ROOT})
-set(BOOST_INCLUDE_DIRS "${BOOST_ROOT}")
-set(BOOST_LIBRARY_DIRS "${BOOST_ROOT}/lib")
+
 
 set(SOURCES_files_sources
     flags.cc
